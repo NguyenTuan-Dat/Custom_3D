@@ -8,7 +8,6 @@ import torch.nn as nn
 from PIL import Image
 from utils import EDDeconv, Encoder, export_to_obj_string, get_grid, is_image_file, load_yaml, save_image, save_video
 
-
 sys.path.insert(0, "./")
 
 EPS = 1e-7
@@ -48,7 +47,7 @@ class Demo:
             lambda d: (1 + d) / 2 * self.max_depth + (1 - d) / 2 * self.min_depth
         )  # (-1,1) => (min_depth,max_depth)
         self.depth_inv_rescaler = lambda d: (d - self.min_depth) / (
-            self.max_depth - self.min_depth
+                self.max_depth - self.min_depth
         )  # (min_depth,max_depth) => (0,1)
 
         fx = (self.image_size - 1) / 2 / (np.tan(self.fov / 2 * np.pi / 180))
@@ -87,7 +86,7 @@ class Demo:
             from renderer.renderer import Renderer
 
             assert (
-                "cuda" in self.device
+                    "cuda" in self.device
             ), "A GPU device is required for rendering because the neural_renderer only has GPU implementation."
             cfgs = {
                 "device": self.device,
@@ -146,7 +145,7 @@ class Demo:
         )  # allow cropping outside by replicating borders
         h0 = int(hc - crop + crop + crop * 0.15)
         w0 = int(wc - crop + crop)
-        return im[h0 : h0 + crop * 2, w0 : w0 + crop * 2]
+        return im[h0: h0 + crop * 2, w0: w0 + crop * 2]
 
     def run(self, pil_im):
         im = np.uint8(pil_im)
@@ -188,10 +187,12 @@ class Demo:
             canon_light = self.netL(self.input_im)  # Bx4
             self.canon_light_a = canon_light[:, :1] / 2 + 0.5  # ambience term
             self.canon_light_b = canon_light[:, 1:2] / 2 + 0.5  # diffuse term
+            print("Shape light ambience:", self.canon_light_a.shape)
+            print("Shape light diffuse:", self.canon_light_b.shape)
             canon_light_dxy = canon_light[:, 2:]
             self.canon_light_d = torch.cat([canon_light_dxy, torch.ones(b, 1).to(self.input_im.device)], 1)
             self.canon_light_d = (
-                self.canon_light_d / ((self.canon_light_d ** 2).sum(1, keepdim=True)) ** 0.5
+                    self.canon_light_d / ((self.canon_light_d ** 2).sum(1, keepdim=True)) ** 0.5
             )  # diffuse light direction
 
             # shading
@@ -200,8 +201,8 @@ class Demo:
                 (self.canon_normal * self.canon_light_d.view(-1, 1, 1, 3)).sum(3).clamp(min=0).unsqueeze(1)
             )
             canon_shading = (
-                self.canon_light_a.view(-1, 1, 1, 1)
-                + self.canon_light_b.view(-1, 1, 1, 1) * self.canon_diffuse_shading
+                    self.canon_light_a.view(-1, 1, 1, 1)
+                    + self.canon_light_b.view(-1, 1, 1, 1) * self.canon_diffuse_shading
             )
             self.canon_im = (self.canon_albedo / 2 + 0.5) * canon_shading * 2 - 1
 
@@ -256,7 +257,7 @@ class Demo:
         view_zero = torch.FloatTensor([0.15 * np.pi / 180 * 60, 0, 0, 0, 0, 0]).to(self.canon_depth.device)
         morph_s = torch.linspace(0, 1, morph_frames).to(self.canon_depth.device)
         view_morph = morph_s.view(-1, 1, 1) * view_zero.view(1, 1, -1) + (
-            1 - morph_s.view(-1, 1, 1)
+                1 - morph_s.view(-1, 1, 1)
         ) * self.view.unsqueeze(
             0
         )  # TxBx6
@@ -278,7 +279,7 @@ class Demo:
                     morph_seq[:, :1].repeat(1, 5, 1, 1, 1),
                     morph_seq,
                     morph_seq[:, -1:].repeat(1, 5, 1, 1, 1),
-                    yaw_seq[:, yaw_frames // 2 :],
+                    yaw_seq[:, yaw_frames // 2:],
                     yaw_seq.flip(1),
                     yaw_seq[:, : yaw_frames // 2],
                     morph_seq[:, -1:].repeat(1, 5, 1, 1, 1),
