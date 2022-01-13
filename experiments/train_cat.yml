@@ -2,11 +2,11 @@
 
 run_train: true
 num_epochs: 200
-batch_size: 32
+batch_size: 50
 checkpoint_dir: results/cat
 save_checkpoint_freq: 10
 keep_num_checkpoint: 2
-resume: true
+resume: false
 use_logger: true
 log_freq: 100
 
@@ -15,7 +15,7 @@ num_workers: 4
 image_size: 64
 crop: 170
 load_gt_depth: false
-train_val_data_dir: data/cat_combined
+train_val_data_dir: /kaggle/working/cat_combined
 
 ## model
 model_name: lemul_cat
