@@ -364,6 +364,8 @@ class LeMul:
         kd = torch.unsqueeze(kd, -1)
 
         canon_light = canon_light / 2 + 0.5
+        canon_F0 = canon_F0 / 2 + 0.5
+        canon_alpha = canon_alpha / 2 + 0.5
 
         canon_light_direction = torch.cat([canon_light_direction, torch.ones(b, 1).to(self.device)], 1)
 
