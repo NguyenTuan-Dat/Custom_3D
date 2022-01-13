@@ -7,6 +7,7 @@ import torch.nn as nn
 import torchvision
 import utils
 from renderer.renderer import Renderer
+from renderer.renderer import get_transform_matrices
 
 EPS = 1e-7
 
@@ -30,7 +31,11 @@ class LeMul:
         # networks and optimizers
         self.netD = networks.EDDeconv(cin=3, cout=1, nf=64, zdim=256, activation=None)
         self.netA = networks.EDDeconv(cin=3, cout=3, nf=64, zdim=256)
-        self.netL = networks.Encoder(cin=3, cout=4, nf=32)
+        self.netL = networks.EDDeconv(cin=3, cout=3, nf=64)
+        self.netLD = networks.Encoder(cin=3, cout=2, nf=32)
+        self.netAlpha = networks.Encoder(cin=3, cout=1, nf=32)
+        self.netF0 = networks.Encoder(cin=3, cout=3, nf=32)
+        self.netKSKD = networks.Encoder(cin=3, cout=2, nf=32)
         self.netV = networks.Encoder(cin=3, cout=6, nf=32)
         self.netC = networks.ConfNet(cin=3, cout=1, nf=64, zdim=128)
         self.netC2 = networks.ConfNet(cin=6, cout=1, nf=64, zdim=128)
@@ -198,18 +203,29 @@ class LeMul:
 
     # BRDF ===========================================================================================================#
     def D(self, normal, halfway, alpha):
-        n_dot_h = torch.max((torch.dot(normal, halfway), 0.0))
+        # n_dot_h [B,64,64]
+        # alpha [B, 1]
+        n_dot_h = self.__dot(normal, halfway)
 
-        NDF = alpha ** 2 / (torch.pi * ((n_dot_h) ** 2 * (alpha ** 2 - 1) + 1) ** 2)
+        alpha_square = alpha ** 2
+        alpha_square = torch.unsqueeze(alpha_square, -2)
+        alpha_reshape = alpha_square.repeat(1, 64, 64)
+
+        NDF = alpha_reshape / (math.pi * ((n_dot_h) ** 2 * (alpha_reshape - 1) + 1) ** 2)
 
         return NDF
 
     def geometrySchlickGGX(self, n_dot_v, k):
+        k = torch.unsqueeze(k, -2)
+        k = k.repeat(1, 64, 64)
         return n_dot_v / (n_dot_v * (1 - k) + k)
 
     def G(self, n, v, l, k):
-        n_dot_v = torch.max((torch.dot(n, v), 0.0))
-        n_dot_l = torch.max((torch.dot(n, l), 0.0))
+        l = torch.unsqueeze(l, -2)
+        l = torch.unsqueeze(l, -2)
+        l = l.repeat(1, 64, 64, 1)
+        n_dot_v = self.__dot(n, v)
+        n_dot_l = self.__dot(n, l)
         ggx1 = self.geometrySchlickGGX(n_dot_v, k)
         ggx2 = self.geometrySchlickGGX(n_dot_l, k)
 
@@ -224,21 +240,73 @@ class LeMul:
         :return: Fresnel value
         :rtype:
         """
-        return F0 + (1 - F0) * (1 - h_dot_v) ** 5
+        h_dot_v = torch.unsqueeze(h_dot_v, -1)
+        h_dot_v = h_dot_v.repeat(1, 3)
+        f = F0 + (1 - F0) * (1 - h_dot_v) ** 5
+        f = torch.sum(f, dim=1)
+        f = torch.unsqueeze(f, -1)
+        f = torch.unsqueeze(f, -1)
+        f = f.repeat(1, 64, 64)
+        return f
+
+    def __dot(self, v1, v2, min=0.):
+        v1 = torch.unsqueeze(v1, -2)
+        v2 = torch.unsqueeze(v2, -1)
+        v1_dot_v2 = torch.matmul(v1, v2).clamp(min=min)
+        v1_dot_v2 = torch.squeeze(v1_dot_v2)
+
+        return v1_dot_v2
 
     def f_cook_torrance(self, omega_0, omega_i, normal, halfway, alpha, view, F0, light, is_light_direct):
+        """
+        :param omega_0: view direction (x,y,z), SHAPE: [BATCH, 3]
+        :type omega_0:
+        :param omega_i: light incoming direction (x,y,z), SHAPE: [BATCH, W*H*num_of_directions, 3]
+                        num_of_directions Temporarily equal to 1
+        :type omega_i:
+        :param normal: normal vectors, SHAPE: [BATCH, W*H, 3]
+        :type normal:
+        :param halfway: halfway = norm(light direction + view direction), SHAPE: [BATCH, W*H, 3]
+        :type halfway:
+        :param alpha: surface's roughness
+        :type alpha: float
+        :param view:
+        :type view:
+        :param F0: the base reflectivity of the surface
+        :type F0:
+        :param light: light direction
+        :type light:
+        :param is_light_direct:
+        :type is_light_direct:
+        :return:
+        :rtype:
+        """
         if is_light_direct:
             k = (alpha + 1) ** 2 / 8
         else:
             k = alpha ** 2 / 2
 
-        omega_0_dot_n = torch.max((torch.dot(omega_0, normal), 0.0001))
-        omega_i_dot_n = torch.max((torch.dot(omega_i, normal), 0.0001))
-        h_dot_v = torch.max((torch.dot(halfway, view), 0.0))
-        nom = self.D(normal, halfway, alpha) * self.F(h_dot_v, F0) * self.G(normal, view, light, k)
+        omega_0_dot_n = self.__dot(normal, omega_0, min=0.001)
+        omega_i_dot_n = self.__dot(normal, omega_i, min=0.001)
+
+        h_dot_v = self.__dot(halfway, view).clamp(min=0.)
+
+        # Convert from [B, 1, 1, 3] to [B, 64, 64, 3]
+        halfway_reshape = torch.ones_like(normal)
+        halfway_reshape[:, :, :, 0] *= halfway[:, :, :, 0]
+        halfway_reshape[:, :, :, 1] *= halfway[:, :, :, 1]
+        halfway_reshape[:, :, :, 2] *= halfway[:, :, :, 2]
+
+        d = self.D(normal, halfway_reshape, alpha)
+        f = self.F(h_dot_v, F0)
+        g = self.G(normal, omega_0, light, k)
+
+        nom = d * f * g
         denom = 4 * omega_0_dot_n * omega_i_dot_n
 
-        return nom / denom
+        result = nom / denom
+
+        return result
 
     def cook_toorance(self, albedo, kd, ks, omega_0, omega_i, normal, halfway, alpha, view, F0, light, is_light_direct):
         diffuse = kd * albedo / torch.pi
@@ -246,21 +314,68 @@ class LeMul:
 
         return diffuse + specular
 
+    def cal_halfway_vector(self, canon_light_direction, view):
+        canon_light_direction = torch.unsqueeze(canon_light_direction, -2)
+        canon_light_direction = torch.unsqueeze(canon_light_direction, -2)
+        return canon_light_direction + view
+
+    def cal_canon_light_BRDF(self, canon_normal, canon_light, canon_light_direction, view, canon_alpha, canon_F0):
+
+        # Calculating omega_0 (view direction) .......................................................................#
+        # Get view direction in xyz
+        _, omega_0 = get_transform_matrices(view)
+        # Convert from [B, 1, 3] to [B, 1, 1, 3]
+        omega_0 = torch.unsqueeze(omega_0, 1)
+        # Convert from [B, 1, 1, 3] to [B, 64, 64, 3]
+        omega_0_reshape = torch.ones_like(canon_normal)
+        omega_0_reshape[:, :, :, 0] *= omega_0[:, :, :, 0]
+        omega_0_reshape[:, :, :, 1] *= omega_0[:, :, :, 1]
+        omega_0_reshape[:, :, :, 2] *= omega_0[:, :, :, 2]
+        # ............................................................................................................#
+
+        halfway_vector = self.cal_halfway_vector(canon_light_direction, omega_0)
+        omega_i = torch.transpose(canon_light, 1, 3)
+
+        result = self.f_cook_torrance(omega_0=omega_0_reshape,
+                                      omega_i=omega_i[:, :],
+                                      normal=canon_normal[:, :],
+                                      halfway=halfway_vector,
+                                      alpha=canon_alpha,
+                                      view=omega_0,
+                                      F0=canon_F0,
+                                      light=canon_light_direction,
+                                      is_light_direct=True)
+        result = torch.unsqueeze(result, 1)
+
+        return result
+
     # End of BRDF ====================================================================================================#
 
-    def render(self, canon_albedo, canon_depth, canon_light, view):
+    def render(self, canon_albedo, canon_depth, canon_light, canon_light_direction, view, canon_alpha, canon_F0,
+               canon_KSKD):
         b = canon_albedo.shape[0]
+        ks = canon_KSKD[:, 0]
+        ks = torch.unsqueeze(ks, -1)
+        ks = torch.unsqueeze(ks, -1)
+        ks = torch.unsqueeze(ks, -1)
+        kd = canon_KSKD[:, 1]
+        kd = torch.unsqueeze(kd, -1)
+        kd = torch.unsqueeze(kd, -1)
+        kd = torch.unsqueeze(kd, -1)
 
-        canon_light_a = canon_light[:, :1] / 2 + 0.5  # ambience term
-        canon_light_b = canon_light[:, 1:2] / 2 + 0.5  # diffuse term
-        canon_light_dxy = canon_light[:, 2:]
-        canon_light_d = torch.cat([canon_light_dxy, torch.ones(b, 1).to(self.device)], 1)
-        canon_light_d = canon_light_d / ((canon_light_d ** 2).sum(1, keepdim=True)) ** 0.5  # diffuse light direction
+        canon_light = canon_light / 2 + 0.5
+
+        canon_light_direction = torch.cat([canon_light_direction, torch.ones(b, 1).to(self.device)], 1)
 
         canon_normal = self.renderer.get_normal_from_depth(canon_depth)
-        canon_diffuse_shading = (canon_normal * canon_light_d.view(-1, 1, 1, 3)).sum(3).clamp(min=0).unsqueeze(1)
-        canon_shading = canon_light_a.view(-1, 1, 1, 1) + canon_light_b.view(-1, 1, 1, 1) * canon_diffuse_shading
-        canon_im = (canon_albedo / 2 + 0.5) * canon_shading * 2 - 1
+        canon_shading = self.cal_canon_light_BRDF(canon_normal=canon_normal,
+                                                  canon_light=canon_light,
+                                                  canon_light_direction=canon_light_direction,
+                                                  view=view,
+                                                  canon_alpha=canon_alpha,
+                                                  canon_F0=canon_F0)
+
+        canon_im = kd * canon_albedo / math.pi + ks * canon_shading
 
         self.renderer.set_transform_matrices(view)
         recon_depth = self.renderer.warp_canon_depth(canon_depth)
@@ -279,7 +394,7 @@ class LeMul:
 
         return (
             grid_2d_from_canon,
-            canon_diffuse_shading,
+            canon_shading,
             recon_im,
             recon_depth,
             recon_normal,
@@ -311,7 +426,20 @@ class LeMul:
         conf_sigma_l1, conf_sigma_percl = self.netC(input_im)  # Bx1xHxW
 
         # predict lighting
-        canon_light = self.netL(input_im)  # Bx4
+        canon_light = self.netL(input_im)
+
+        canon_light_direction = self.netLD(input_im)
+
+        # predict roughness
+        canon_alpha = self.netAlpha(input_im)
+        canon_alpha = torch.nn.Softmax(dim=1)(canon_alpha)
+
+        # predict "the base reflectivity of the surface"
+        canon_F0 = self.netF0(input_im)
+
+        # predict scale of diffuse and specular
+        canon_KSKD = self.netKSKD(input_im)
+        canon_KSKD_norm = torch.nn.Softmax(dim=1)(canon_KSKD)
 
         # predict viewpoint transformation
         view = self.netV(input_im)
@@ -335,7 +463,8 @@ class LeMul:
             recon_im_mask,
             recon_im_mask_both,
             recon_albedo,
-        ) = self.render(canon_albedo, canon_depth, canon_light, view)
+        ) = self.render(canon_albedo, canon_depth, canon_light, canon_light_direction, view, canon_alpha, canon_F0,
+                        canon_KSKD_norm)
 
         loss_l1_im, loss_perc_im, albedo_loss, loss = self.loss(
             recon_im,
@@ -361,6 +490,10 @@ class LeMul:
             conf_sigma_l1,
             conf_sigma_percl,
             canon_light,
+            canon_light_direction,
+            canon_alpha,
+            canon_F0,
+            canon_KSKD,
             recon_im_mask,
             recon_im_mask_both,
             loss_l1_im,
@@ -414,6 +547,10 @@ class LeMul:
             self.conf_sigma_l1,
             self.conf_sigma_percl,
             self.canon_light,
+            self.canon_light_direction,
+            self.canon_alpha,
+            self.canon_F0,
+            self.canon_KSKD,
             recon_im_mask,
             recon_im_mask_both,
             loss_l1_im,
@@ -439,6 +576,10 @@ class LeMul:
                 self.conf_sigma_l1_support,
                 self.conf_sigma_percl_support,
                 self.canon_light_support,
+                self.canon_light_direction_support,
+                self.canon_alpha_support,
+                self.canon_F0_support,
+                self.canon_KSKD_support,
                 recon_im_mask_support,
                 recon_im_mask_both_support,
                 loss_l1_im_support,
@@ -459,7 +600,14 @@ class LeMul:
                 _,
                 recon_im_mask_both_support_from_im,
                 recon_albedo_support_from_im,
-            ) = self.render(self.canon_albedo, self.canon_depth, self.canon_light_support, self.view_support)
+            ) = self.render(self.canon_albedo,
+                            self.canon_depth,
+                            self.canon_light_support,
+                            self.canon_light_direction_support,
+                            self.view_support,
+                            self.canon_alpha_support,
+                            self.canon_F0_support,
+                            self.canon_KSKD_support)
             conf_sigma_l1_norm_support, conf_sigma_percl_norm_support = self.netC2(
                 torch.cat((self.input_im, self.input_im_support), 1)
             )  # Bx1xHxW
@@ -484,7 +632,14 @@ class LeMul:
                 _,
                 recon_im_mask_both_from_support,
                 recon_albedo_im_from_support,
-            ) = self.render(self.canon_albedo_support, self.canon_depth_support, self.canon_light, self.view)
+            ) = self.render(self.canon_albedo_support,
+                            self.canon_depth_support,
+                            self.canon_light,
+                            self.canon_light_direction,
+                            self.view,
+                            self.canon_alpha,
+                            self.canon_F0,
+                            self.canon_KSKD)
             conf_sigma_l1_norm_im, conf_sigma_percl_norm_im = self.netC2(
                 torch.cat((self.input_im_support, self.input_im), 1)
             )  # Bx1xHxW
