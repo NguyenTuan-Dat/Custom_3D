@@ -377,6 +377,8 @@ class LeMul:
                                                   canon_alpha=canon_alpha,
                                                   canon_F0=canon_F0)
 
+        canon_shading = canon_shading / 2 + 0.5
+
         canon_im = kd * canon_albedo / math.pi + ks * canon_shading
 
         self.renderer.set_transform_matrices(view)
