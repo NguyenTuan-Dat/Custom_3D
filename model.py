@@ -31,7 +31,7 @@ class LeMul:
         # networks and optimizers
         self.netD = networks.EDDeconv(cin=3, cout=1, nf=64, zdim=256, activation=None)
         self.netA = networks.EDDeconv(cin=3, cout=3, nf=64, zdim=256)
-        self.netL = networks.EDDeconv(cin=3, cout=3, nf=64)
+        self.netL = networks.EDDeconv(cin=3, cout=3, nf=64, zdim=256)
         self.netLD = networks.Encoder(cin=3, cout=2, nf=32)
         self.netAlpha = networks.Encoder(cin=3, cout=1, nf=32)
         self.netF0 = networks.Encoder(cin=3, cout=3, nf=32)
@@ -209,9 +209,9 @@ class LeMul:
 
         alpha_square = alpha ** 2
         alpha_square = torch.unsqueeze(alpha_square, -2)
-        alpha_reshape = alpha_square.repeat(1, 64, 64)
+        alpha_square = alpha_square.repeat(1, 64, 64)
 
-        NDF = alpha_reshape / (math.pi * ((n_dot_h) ** 2 * (alpha_reshape - 1) + 1) ** 2)
+        NDF = alpha_square / (math.pi * ((n_dot_h) ** 2 * (alpha_square - 1) + 1) ** 2)
 
         return NDF
 
@@ -305,6 +305,7 @@ class LeMul:
         denom = 4 * omega_0_dot_n * omega_i_dot_n
 
         result = nom / denom
+        result /= omega_i_dot_n
 
         return result
 
@@ -317,13 +318,16 @@ class LeMul:
     def cal_halfway_vector(self, canon_light_direction, view):
         canon_light_direction = torch.unsqueeze(canon_light_direction, -2)
         canon_light_direction = torch.unsqueeze(canon_light_direction, -2)
-        return canon_light_direction + view
+        halfway = canon_light_direction + view
+        halfway = halfway / torch.max(torch.abs(halfway))
+        return halfway
 
     def cal_canon_light_BRDF(self, canon_normal, canon_light, canon_light_direction, view, canon_alpha, canon_F0):
 
         # Calculating omega_0 (view direction) .......................................................................#
         # Get view direction in xyz
         _, omega_0 = get_transform_matrices(view)
+        omega_0 = omega_0 / ((omega_0 ** 2).sum(1, keepdim=True)) ** 0.5
         # Convert from [B, 1, 3] to [B, 1, 1, 3]
         omega_0 = torch.unsqueeze(omega_0, 1)
         # Convert from [B, 1, 1, 3] to [B, 64, 64, 3]
@@ -344,7 +348,7 @@ class LeMul:
                                       view=omega_0,
                                       F0=canon_F0,
                                       light=canon_light_direction,
-                                      is_light_direct=True)
+                                      is_light_direct=False)
         result = torch.unsqueeze(result, 1)
 
         return result
@@ -368,6 +372,7 @@ class LeMul:
         canon_alpha = canon_alpha / 2 + 0.5
 
         canon_light_direction = torch.cat([canon_light_direction, torch.ones(b, 1).to(self.device)], 1)
+        canon_light_direction = canon_light_direction / ((canon_light_direction ** 2).sum(1, keepdim=True)) ** 0.5
 
         canon_normal = self.renderer.get_normal_from_depth(canon_depth)
         canon_shading = self.cal_canon_light_BRDF(canon_normal=canon_normal,
@@ -377,7 +382,7 @@ class LeMul:
                                                   canon_alpha=canon_alpha,
                                                   canon_F0=canon_F0)
 
-        canon_shading = canon_shading / 2 + 0.5
+        # canon_shading = canon_shading / ((canon_shading ** 2).sum(1, keepdim=True)) ** 0.5
 
         canon_im = kd * canon_albedo / math.pi + ks * canon_shading
 
@@ -727,6 +732,7 @@ class LeMul:
         if not self.run_finetune:
             input_im_support = self.input_im_support[:b0].detach().cpu() / 2.0 + 0.5
         canon_albedo = self.canon_albedo[:b0].detach().cpu() / 2.0 + 0.5
+        canon_light = self.canon_light[:b0].detach().cpu() / 2.0 + 0.5
         recon_albedo = self.recon_albedo[:b0].detach().cpu() / 2.0 + 0.5
         canon_im = self.canon_im[:b0].detach().cpu() / 2.0 + 0.5
         recon_im = self.recon_im[:b0].detach().cpu() / 2.0 + 0.5
@@ -758,6 +764,10 @@ class LeMul:
         canon_normal_rotate_grid = torch.stack(canon_normal_rotate_grid, 0).unsqueeze(0)  # (1,T,C,H,W)
 
         # write summary
+        logger.add_scalar("Loss/loss_img", self.loss_im, total_iter)
+        logger.add_scalar("Loss/loss_img_support", self.loss_im_support, total_iter)
+        logger.add_scalar("Loss/loss_img_from_support", self.loss_im_from_support, total_iter)
+        logger.add_scalar("Loss/loss_support_from_img", self.loss_support_from_im, total_iter)
         logger.add_scalar("Loss/loss_total", self.loss_total, total_iter)
 
         logger.add_histogram("Depth/canon_depth_raw_hist", canon_depth_raw_hist, total_iter)
@@ -774,6 +784,7 @@ class LeMul:
             log_grid_image("Image/input_image_support", input_im_support)
         log_grid_image("Image/canonical_albedo", canon_albedo)
         log_grid_image("Image/recon_albedo", recon_albedo)
+        log_grid_image("Image/canonical_light", canon_light)
         log_grid_image("Image/canonical_image", canon_im)
         log_grid_image("Image/recon_image", recon_im)
         if not self.run_finetune:
