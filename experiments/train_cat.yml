@@ -33,3 +33,5 @@ lr: 0.0001
 rot_center_depth: 1.0
 fov: 10  # in degrees
 tex_cube_size: 2
+
+archive_code: false
