@@ -289,15 +289,12 @@ class LeMul:
         omega_0_dot_n = self.__dot(normal, omega_0, min=0.001)
         omega_i_dot_n = self.__dot(normal, omega_i, min=0.001)
 
-        h_dot_v = self.__dot(halfway, view).clamp(min=0.)
+        h_dot_v = self.__dot(halfway, view)
 
         # Convert from [B, 1, 1, 3] to [B, 64, 64, 3]
-        halfway_reshape = torch.ones_like(normal)
-        halfway_reshape[:, :, :, 0] *= halfway[:, :, :, 0]
-        halfway_reshape[:, :, :, 1] *= halfway[:, :, :, 1]
-        halfway_reshape[:, :, :, 2] *= halfway[:, :, :, 2]
+        halfway = halfway.repeat(1, 64, 64, 1)
 
-        d = self.D(normal, halfway_reshape, alpha)
+        d = self.D(normal, halfway, alpha)
         f = self.F(h_dot_v, F0)
         g = self.G(normal, omega_0, light, k)
 
@@ -305,7 +302,6 @@ class LeMul:
         denom = 4 * omega_0_dot_n * omega_i_dot_n
 
         result = nom / denom
-        result /= omega_i_dot_n
 
         return result
 
@@ -331,18 +327,15 @@ class LeMul:
         # Convert from [B, 1, 3] to [B, 1, 1, 3]
         omega_0 = torch.unsqueeze(omega_0, 1)
         # Convert from [B, 1, 1, 3] to [B, 64, 64, 3]
-        omega_0_reshape = torch.ones_like(canon_normal)
-        omega_0_reshape[:, :, :, 0] *= omega_0[:, :, :, 0]
-        omega_0_reshape[:, :, :, 1] *= omega_0[:, :, :, 1]
-        omega_0_reshape[:, :, :, 2] *= omega_0[:, :, :, 2]
+        omega_0_reshape = omega_0.repeat(1, 64, 64, 1)
         # ............................................................................................................#
 
         halfway_vector = self.cal_halfway_vector(canon_light_direction, omega_0)
         omega_i = torch.transpose(canon_light, 1, 3)
 
         result = self.f_cook_torrance(omega_0=omega_0_reshape,
-                                      omega_i=omega_i[:, :],
-                                      normal=canon_normal[:, :],
+                                      omega_i=omega_i,
+                                      normal=canon_normal,
                                       halfway=halfway_vector,
                                       alpha=canon_alpha,
                                       view=omega_0,
@@ -369,7 +362,7 @@ class LeMul:
 
         canon_light = canon_light / 2 + 0.5
         canon_F0 = canon_F0 / 2 + 0.5
-        canon_alpha = canon_alpha / 2 + 0.5
+        canon_alpha = (canon_alpha / 2 + 0.5).clamp(0.001)
 
         canon_light_direction = torch.cat([canon_light_direction, torch.ones(b, 1).to(self.device)], 1)
         canon_light_direction = canon_light_direction / ((canon_light_direction ** 2).sum(1, keepdim=True)) ** 0.5
@@ -381,6 +374,7 @@ class LeMul:
                                                   view=view,
                                                   canon_alpha=canon_alpha,
                                                   canon_F0=canon_F0)
+        canon_shading = canon_shading / 2 + 0.5
 
         # canon_shading = canon_shading / ((canon_shading ** 2).sum(1, keepdim=True)) ** 0.5
 
