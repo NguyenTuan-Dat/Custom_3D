@@ -325,7 +325,7 @@ class LeMul:
         print("[cal_canon_light_BRDF] view", view.shape)
         # _, omega_0 = get_transform_matrices(view)
         # omega_0 = omega_0 / ((omega_0 ** 2).sum(1, keepdim=True)) ** 0.5
-        omega_0 = view
+        omega_0 = view.clone().detach()
         # Convert from [B, 3] to [B, 1, 1, 3]
         omega_0 = torch.unsqueeze(omega_0, 1)
         omega_0 = torch.unsqueeze(omega_0, 1)
