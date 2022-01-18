@@ -341,7 +341,7 @@ class LeMul:
                                       normal=canon_normal,
                                       halfway=halfway_vector,
                                       alpha=canon_alpha,
-                                      view=omega_0,
+                                      view=view,
                                       F0=canon_F0,
                                       light=canon_light_direction,
                                       is_light_direct=False)
