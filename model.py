@@ -322,9 +322,12 @@ class LeMul:
 
         # Calculating omega_0 (view direction) .......................................................................#
         # Get view direction in xyz
-        _, omega_0 = get_transform_matrices(view)
-        omega_0 = omega_0 / ((omega_0 ** 2).sum(1, keepdim=True)) ** 0.5
-        # Convert from [B, 1, 3] to [B, 1, 1, 3]
+        print("[cal_canon_light_BRDF] view", view.shape)
+        # _, omega_0 = get_transform_matrices(view)
+        # omega_0 = omega_0 / ((omega_0 ** 2).sum(1, keepdim=True)) ** 0.5
+        omega_0 = view
+        # Convert from [B, 3] to [B, 1, 1, 3]
+        omega_0 = torch.unsqueeze(omega_0, 1)
         omega_0 = torch.unsqueeze(omega_0, 1)
         # Convert from [B, 1, 1, 3] to [B, 64, 64, 3]
         omega_0_reshape = omega_0.repeat(1, 64, 64, 1)
@@ -374,11 +377,12 @@ class LeMul:
                                                   view=view,
                                                   canon_alpha=canon_alpha,
                                                   canon_F0=canon_F0)
-        canon_shading = canon_shading / 2 + 0.5
+        # canon_shading = canon_shading / 2 + 0.5
 
         # canon_shading = canon_shading / ((canon_shading ** 2).sum(1, keepdim=True)) ** 0.5
 
         canon_im = kd * canon_albedo / math.pi + ks * canon_shading
+        # canon_im = kd * canon_albedo + ks * canon_shading * 255
 
         self.renderer.set_transform_matrices(view)
         recon_depth = self.renderer.warp_canon_depth(canon_depth)
