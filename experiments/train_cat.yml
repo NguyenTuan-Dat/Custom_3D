@@ -1,12 +1,12 @@
 ## train cat
 
 run_train: true
-num_epochs: 200
+num_epochs: 300
 batch_size: 50
 checkpoint_dir: results/cat
 save_checkpoint_freq: 10
 keep_num_checkpoint: 2
-resume: false
+resume: true
 use_logger: true
 log_freq: 100
 
