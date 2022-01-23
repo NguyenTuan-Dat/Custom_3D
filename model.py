@@ -798,7 +798,7 @@ class LeMul:
         log_grid_image("Depth/canonical_depth_raw", canon_depth_raw)
         log_grid_image("Depth/canonical_depth", canon_depth)
         log_grid_image("Depth/recon_depth", recon_depth)
-        log_grid_image("Depth/canonical_diffuse_shading", canon_diffuse_shading)
+        log_grid_image("Depth/canonical_diffuse_shading", canon_diffuse_shading * 255)
         log_grid_image("Depth/canonical_normal", canon_normal)
         log_grid_image("Depth/recon_normal", recon_normal)
 
