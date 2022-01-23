@@ -35,3 +35,4 @@ fov: 10  # in degrees
 tex_cube_size: 2
 
 archive_code: false
+lr: 0.00001

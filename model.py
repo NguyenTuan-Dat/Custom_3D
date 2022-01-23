@@ -87,17 +87,18 @@ class LeMul:
         print("[load_model_state] loading...")
         for k in cp:
             # if k and k in self.network_names:
-            if k and k in ["netD", "netV", "netA"]:
+            if k and "net" in k:
                 print("[load_model_state] loading {}...".format(k))
                 getattr(self, k).load_state_dict(cp[k])
-                if k in ["netD", "netV", "netA"]:
+                # if k in ["netD", "netV", "netA"]:
+                if k in ["netL", "netLD", "netAlpha", "netKSKD", "netF0"]:
                     for param in getattr(self, k).parameters():
                         param.requires_grad = False
                 print("[load_model_state] loaded {}...".format(k))
 
     def load_optimizer_state(self, cp):
         for k in cp:
-            if k and k in ["netD", "netV", "netA"]:
+            if k and "net" in k:
                 getattr(self, k).load_state_dict(cp[k])
 
     def get_model_state(self):
