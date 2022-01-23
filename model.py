@@ -86,8 +86,9 @@ class LeMul:
     def load_model_state(self, cp):
         print("[load_model_state] loading...")
         for k in cp:
+            # if k and "net" in k:
             # if k and k in self.network_names:
-            if k and "net" in k:
+            if k and k in ["netD", "netV", "netA"]:
                 print("[load_model_state] loading {}...".format(k))
                 getattr(self, k).load_state_dict(cp[k])
                 # if k in ["netD", "netV", "netA"]:
