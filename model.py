@@ -31,7 +31,7 @@ class LeMul:
         # networks and optimizers
         self.netD = networks.EDDeconv(cin=3, cout=1, nf=64, zdim=256, activation=None)
         self.netA = networks.EDDeconv(cin=3, cout=3, nf=64, zdim=256)
-        self.netL = networks.EDDeconv(cin=3, cout=3, nf=64, zdim=256)
+        self.netL = networks.EDDeconv(cin=3, cout=4, nf=64, zdim=256)
         self.netLD = networks.Encoder(cin=3, cout=2, nf=32)
         self.netAlpha = networks.Encoder(cin=3, cout=1, nf=32)
         self.netF0 = networks.Encoder(cin=3, cout=3, nf=32)
@@ -84,13 +84,20 @@ class LeMul:
             self.optimizer_names += [optim_name]
 
     def load_model_state(self, cp):
+        print("[load_model_state] loading...")
         for k in cp:
-            if k and k in self.network_names:
+            # if k and k in self.network_names:
+            if k and k in ["netD", "netV", "netA"]:
+                print("[load_model_state] loading {}...".format(k))
                 getattr(self, k).load_state_dict(cp[k])
+                if k in ["netD", "netV", "netA"]:
+                    for param in getattr(self, k).parameters():
+                        param.requires_grad = False
+                print("[load_model_state] loaded {}...".format(k))
 
     def load_optimizer_state(self, cp):
         for k in cp:
-            if k and k in self.optimizer_names:
+            if k and k in ["netD", "netV", "netA"]:
                 getattr(self, k).load_state_dict(cp[k])
 
     def get_model_state(self):
@@ -211,14 +218,14 @@ class LeMul:
         alpha_square = torch.unsqueeze(alpha_square, -2)
         alpha_square = alpha_square.repeat(1, 64, 64)
 
-        NDF = alpha_square / (math.pi * ((n_dot_h) ** 2 * (alpha_square - 1) + 1) ** 2)
+        NDF = alpha_square / (math.pi * (((n_dot_h) ** 2) * (alpha_square - 1) + 1) ** 2)
 
         return NDF
 
     def geometrySchlickGGX(self, n_dot_v, k):
         k = torch.unsqueeze(k, -2)
         k = k.repeat(1, 64, 64)
-        return n_dot_v / (n_dot_v * (1 - k) + k)
+        return n_dot_v / ((n_dot_v * (1 - k)) + k)
 
     def G(self, n, v, l, k):
         l = torch.unsqueeze(l, -2)
@@ -286,8 +293,8 @@ class LeMul:
         else:
             k = alpha ** 2 / 2
 
-        omega_0_dot_n = self.__dot(normal, omega_0, min=0.001)
-        omega_i_dot_n = self.__dot(normal, omega_i, min=0.001)
+        omega_0_dot_n = self.__dot(omega_0, normal, min=0.001)
+        omega_i_dot_n = self.__dot(omega_i, normal, min=0.001)
 
         h_dot_v = self.__dot(halfway, view)
 
@@ -305,29 +312,22 @@ class LeMul:
 
         return result
 
-    def cook_toorance(self, albedo, kd, ks, omega_0, omega_i, normal, halfway, alpha, view, F0, light, is_light_direct):
-        diffuse = kd * albedo / torch.pi
-        specular = ks * self.f_cook_torrance(omega_0, omega_i, normal, halfway, alpha, view, F0, light, is_light_direct)
-
-        return diffuse + specular
-
     def cal_halfway_vector(self, canon_light_direction, view):
         canon_light_direction = torch.unsqueeze(canon_light_direction, -2)
         canon_light_direction = torch.unsqueeze(canon_light_direction, -2)
         halfway = canon_light_direction + view
-        halfway = halfway / torch.max(torch.abs(halfway))
+        halfway = halfway / ((halfway ** 2).sum(1, keepdim=True)) ** 0.5
         return halfway
 
     def cal_canon_light_BRDF(self, canon_normal, canon_light, canon_light_direction, view, canon_alpha, canon_F0):
 
         # Calculating omega_0 (view direction) .......................................................................#
         # Get view direction in xyz
-        print("[cal_canon_light_BRDF] view", view.shape)
-        # _, omega_0 = get_transform_matrices(view)
+        _, omega_0 = get_transform_matrices(view)
         # omega_0 = omega_0 / ((omega_0 ** 2).sum(1, keepdim=True)) ** 0.5
-        omega_0 = view.clone().detach()[:, 3:]
+        # omega_0 = view.clone().detach()[:, :3]
         # Convert from [B, 3] to [B, 1, 1, 3]
-        omega_0 = torch.unsqueeze(omega_0, 1)
+        # omega_0 = torch.unsqueeze(omega_0, 1)
         omega_0 = torch.unsqueeze(omega_0, 1)
         # Convert from [B, 1, 1, 3] to [B, 64, 64, 3]
         omega_0_reshape = omega_0.repeat(1, 64, 64, 1)
@@ -349,6 +349,10 @@ class LeMul:
 
         return result
 
+    def L(self, flux):
+        flux_square = flux ** 2
+        return flux_square
+
     # End of BRDF ====================================================================================================#
 
     def render(self, canon_albedo, canon_depth, canon_light, canon_light_direction, view, canon_alpha, canon_F0,
@@ -363,7 +367,8 @@ class LeMul:
         kd = torch.unsqueeze(kd, -1)
         kd = torch.unsqueeze(kd, -1)
 
-        canon_light = canon_light / 2 + 0.5
+        flux = canon_light[:, 3:]
+        canon_light = canon_light[:, :3] / 2 + 0.5
         canon_F0 = canon_F0 / 2 + 0.5
         canon_alpha = (canon_alpha / 2 + 0.5).clamp(0.001)
 
@@ -377,11 +382,10 @@ class LeMul:
                                                   view=view,
                                                   canon_alpha=canon_alpha,
                                                   canon_F0=canon_F0)
-        # canon_shading = canon_shading / 2 + 0.5
 
-        # canon_shading = canon_shading / ((canon_shading ** 2).sum(1, keepdim=True)) ** 0.5
+        canon_albedo = canon_albedo / math.pi
 
-        canon_im = kd * canon_albedo / math.pi + ks * canon_shading
+        canon_im = (kd * canon_albedo + ks * canon_shading.sum((2, 3), keepdim=True).clamp(0.)) * self.L(flux)
         # canon_im = kd * canon_albedo + ks * canon_shading * 255
 
         self.renderer.set_transform_matrices(view)
@@ -730,7 +734,7 @@ class LeMul:
         if not self.run_finetune:
             input_im_support = self.input_im_support[:b0].detach().cpu() / 2.0 + 0.5
         canon_albedo = self.canon_albedo[:b0].detach().cpu() / 2.0 + 0.5
-        canon_light = self.canon_light[:b0].detach().cpu() / 2.0 + 0.5
+        canon_light = self.canon_light[:b0, :3].detach().cpu() / 2.0 + 0.5
         recon_albedo = self.recon_albedo[:b0].detach().cpu() / 2.0 + 0.5
         canon_im = self.canon_im[:b0].detach().cpu() / 2.0 + 0.5
         recon_im = self.recon_im[:b0].detach().cpu() / 2.0 + 0.5

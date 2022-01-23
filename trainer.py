@@ -129,7 +129,7 @@ class Trainer:
             self.metrics_trace.plot(pdf_path=os.path.join(self.checkpoint_dir, "metrics.pdf"))
             self.metrics_trace.save(os.path.join(self.checkpoint_dir, "metrics.json"))
 
-        print(f"Training completed after {epoch+1} epochs.")
+            print(f"Training completed after {epoch + 1} epochs.")
 
     def run_epoch(self, loader, epoch=0, is_validation=False, is_test=False):
         """Run one epoch."""
