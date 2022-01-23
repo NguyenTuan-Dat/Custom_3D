@@ -99,7 +99,8 @@ class LeMul:
 
     def load_optimizer_state(self, cp):
         for k in cp:
-            if k and "net" in k:
+            # if k and "net" in k:
+            if k and k in ["netD", "netV", "netA"]:
                 getattr(self, k).load_state_dict(cp[k])
 
     def get_model_state(self):
