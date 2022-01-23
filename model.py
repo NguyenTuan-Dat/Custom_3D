@@ -384,9 +384,9 @@ class LeMul:
                                                   canon_alpha=canon_alpha,
                                                   canon_F0=canon_F0)
 
-        canon_albedo = canon_albedo / math.pi
+        canon_albedo = kd * canon_albedo / math.pi
 
-        canon_im = (kd * canon_albedo + ks * canon_shading.sum((2, 3), keepdim=True).clamp(0.)) * self.L(flux)
+        canon_im = (canon_albedo + ks * canon_shading.sum((2, 3), keepdim=True).clamp(0.)) * self.L(flux)
         # canon_im = kd * canon_albedo + ks * canon_shading * 255
 
         self.renderer.set_transform_matrices(view)
