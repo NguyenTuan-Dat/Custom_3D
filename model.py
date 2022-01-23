@@ -91,9 +91,9 @@ class LeMul:
                 print("[load_model_state] loading {}...".format(k))
                 getattr(self, k).load_state_dict(cp[k])
                 # if k in ["netD", "netV", "netA"]:
-                if k in ["netL", "netLD", "netAlpha", "netKSKD", "netF0"]:
-                    for param in getattr(self, k).parameters():
-                        param.requires_grad = False
+                # if k in ["netL", "netLD", "netAlpha", "netKSKD", "netF0"]:
+                #     for param in getattr(self, k).parameters():
+                #         param.requires_grad = False
                 print("[load_model_state] loaded {}...".format(k))
 
     def load_optimizer_state(self, cp):
