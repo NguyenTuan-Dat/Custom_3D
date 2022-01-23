@@ -782,16 +782,16 @@ class LeMul:
             im_grid = torchvision.utils.make_grid(im, nrow=nrow)
             logger.add_image(label, im_grid, iter)
 
-        log_grid_image("Image/input_image", input_im)
+        log_grid_image("Image/a_input_image", input_im)
         if not self.run_finetune:
-            log_grid_image("Image/input_image_support", input_im_support)
+            log_grid_image("Image/b_input_image_support", input_im_support)
         log_grid_image("Image/canonical_albedo", canon_albedo)
         log_grid_image("Image/recon_albedo", recon_albedo)
         log_grid_image("Image/canonical_light", canon_light)
         log_grid_image("Image/canonical_image", canon_im)
-        log_grid_image("Image/recon_image", recon_im)
+        log_grid_image("Image/a_recon_image", recon_im)
         if not self.run_finetune:
-            log_grid_image("Image/recon_image_support", recon_im_support)
+            log_grid_image("Image/b_recon_image_support", recon_im_support)
         log_grid_image("Image/recon_side", canon_im_rotate[:, 0, :, :, :])
         log_grid_image("Image/recon_side_2", canon_im_rotate[:, 1, :, :, :])
 
