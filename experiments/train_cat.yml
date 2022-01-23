@@ -1,7 +1,7 @@
 ## train cat
 
 run_train: true
-num_epochs: 300
+num_epochs: 400
 batch_size: 50
 checkpoint_dir: results/cat
 save_checkpoint_freq: 10
@@ -27,7 +27,7 @@ z_translation_range: 0.1  # (-t,t) in 3D
 lam_perc: 1
 lam_flip: 0.5
 lam_flip_start_epoch: 10
-lr: 0.0001
+lr: 0.00001
 
 ## renderer
 rot_center_depth: 1.0
@@ -35,4 +35,3 @@ fov: 10  # in degrees
 tex_cube_size: 2
 
 archive_code: false
-lr: 0.00001
