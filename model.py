@@ -388,9 +388,9 @@ class LeMul:
 
         canon_albedo = kd * canon_albedo / math.pi
 
-        # set flux = 1 and remove canon_shading.sum
-        canon_im = (canon_albedo + ks * canon_shading)
-        
+        # set flux = 1
+        canon_im = (canon_albedo + ks * canon_shading.sum((2, 3), keepdim=True).clamp(0.))
+
         # canon_im = (canon_albedo + ks * canon_shading) * self.L(flux)
         # canon_im = (canon_albedo + ks * canon_shading.sum((2, 3), keepdim=True).clamp(0.)) * self.L(flux)
         # canon_im = (canon_albedo + ks * canon_shading.sum((2, 3), keepdim=True).clamp(0.))
