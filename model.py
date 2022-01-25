@@ -31,7 +31,7 @@ class LeMul:
         # networks and optimizers
         self.netD = networks.EDDeconv(cin=3, cout=1, nf=64, zdim=256, activation=None)
         self.netA = networks.EDDeconv(cin=3, cout=3, nf=64, zdim=256)
-        self.netL = networks.EDDeconv(cin=3, cout=3, nf=64, zdim=256)
+        self.netL = networks.EDDeconv(cin=3, cout=4, nf=64, zdim=256)
         self.netLD = networks.Encoder(cin=3, cout=2, nf=32)
         self.netAlpha = networks.Encoder(cin=3, cout=1, nf=32)
         self.netF0 = networks.Encoder(cin=3, cout=3, nf=32)
@@ -370,7 +370,7 @@ class LeMul:
         kd = torch.unsqueeze(kd, -1)
         kd = torch.unsqueeze(kd, -1)
 
-        # flux = canon_light[:, 3:]
+        flux = canon_light[:, 3:]
         canon_light = canon_light[:, :3] / 2 + 0.5
         canon_F0 = canon_F0 / 2 + 0.5
         canon_alpha = (canon_alpha / 2 + 0.5).clamp(0.001)
@@ -389,10 +389,10 @@ class LeMul:
         canon_albedo = kd * canon_albedo / math.pi
 
         # set flux = 1
-        canon_im = (canon_albedo + ks * canon_shading.sum((2, 3), keepdim=True).clamp(0.))
+        # canon_im = (canon_albedo + ks * canon_shading.sum((2, 3), keepdim=True).clamp(0.))
 
         # canon_im = (canon_albedo + ks * canon_shading) * self.L(flux)
-        # canon_im = (canon_albedo + ks * canon_shading.sum((2, 3), keepdim=True).clamp(0.)) * self.L(flux)
+        canon_im = (canon_albedo + ks * canon_shading.sum((2, 3), keepdim=True).clamp(0.)) * self.L(flux)
         # canon_im = (canon_albedo + ks * canon_shading.sum((2, 3), keepdim=True).clamp(0.))
         # canon_im = kd * canon_albedo + ks * canon_shading * 255
 
