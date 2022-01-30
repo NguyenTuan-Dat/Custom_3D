@@ -86,22 +86,24 @@ class LeMul:
     def load_model_state(self, cp):
         print("[load_model_state] loading...")
         for k in cp:
-            # if k and "net" in k:
-            # if k and k in self.network_names:
-            if k and k in ["netD", "netV", "netA", "netC", "netC2"]:
+            if k and "net" in k:
+                # if k and k in ["netD", "netV", "netC", "netC2"]:
+                # if k and k in self.network_names:
+                # if k and k in ["netD", "netV", "netA", "netC", "netC2"]:
                 print("[load_model_state] loading {}...".format(k))
                 getattr(self, k).load_state_dict(cp[k])
-                # if k in ["netD", "netV", "netA"]:
-                # if k in ["netL", "netLD", "netAlpha", "netKSKD", "netF0"]:
-                if k in ["netC", "netC2"]:
-                    for param in getattr(self, k).parameters():
-                        param.requires_grad = False
+                # if k in ["netD", "netV", "netC", "netC2"]:
+                # if k in ["netL", "netLD", "netAlpha", "netKSKD", "netF0", "netA"]:
+                # if k in k != "netD":
+                #     for param in getattr(self, k).parameters():
+                #         param.requires_grad = False
                 print("[load_model_state] loaded {}...".format(k))
 
     def load_optimizer_state(self, cp):
         for k in cp:
-            # if k and "net" in k:
-            if k and k in ["netD", "netV", "netA", "netC", "netC2"]:
+            if k and "net" in k:
+                # if k and k in ["netD", "netV", "netA"]:
+                # if k and k in ["netD", "netV", "netC", "netC2"]:
                 getattr(self, k).load_state_dict(cp[k])
 
     def get_model_state(self):
@@ -387,13 +389,15 @@ class LeMul:
                                                   canon_alpha=canon_alpha,
                                                   canon_F0=canon_F0)
 
-        canon_albedo = kd * canon_albedo / math.pi
+        canon_albedo = kd * canon_albedo
+        canon_shading = ks * canon_shading
 
         # set flux = 1
         # canon_im = (canon_albedo + ks * canon_shading.sum((2, 3), keepdim=True).clamp(0.))
 
-        # canon_im = (canon_albedo + ks * canon_shading) * self.L(flux)
-        canon_im = (canon_albedo + ks * canon_shading.sum((2, 3), keepdim=True).clamp(0.)) * self.L(flux)
+        # canon_im = (canon_albedo + canon_shading)
+        canon_im = (canon_albedo + canon_shading) * self.L(flux)
+        # canon_im = (canon_albedo + ks * canon_shading.sum((2, 3), keepdim=True).clamp(0.)) * self.L(flux)
         # canon_im = (canon_albedo + ks * canon_shading.sum((2, 3), keepdim=True).clamp(0.))
         # canon_im = kd * canon_albedo + ks * canon_shading * 255
 
@@ -534,6 +538,7 @@ class LeMul:
             conf_sigma_percl=None,
     ):
         albedo_loss = self.cal_albedo_loss(input_im, recon_depth, recon_albedo, mask=recon_im_mask_both)
+        # albedo_loss = 0.0
         loss_l1_im = self.photometric_loss(
             recon_im, input_im, mask=recon_im_mask_both, conf_sigma=conf_sigma_l1[:, :1]
         )
@@ -806,7 +811,7 @@ class LeMul:
         log_grid_image("Depth/canonical_depth_raw", canon_depth_raw)
         log_grid_image("Depth/canonical_depth", canon_depth)
         log_grid_image("Depth/recon_depth", recon_depth)
-        log_grid_image("Depth/canonical_diffuse_shading", canon_diffuse_shading * 255)
+        log_grid_image("Depth/canonical_diffuse_shading", canon_diffuse_shading)
         log_grid_image("Depth/canonical_normal", canon_normal)
         log_grid_image("Depth/recon_normal", recon_normal)
 
