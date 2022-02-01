@@ -1,6 +1,10 @@
 import torch
 import torch.nn as nn
 import torchvision
+from einops import rearrange, repeat
+from einops.layers.torch import Rearrange
+from torch import Tensor
+import torch.nn.functional as F
 
 EPS = 1e-7
 
@@ -29,32 +33,88 @@ class Encoder(nn.Module):
         return self.network(input).reshape(input.size(0), -1)
 
 
-# NeRF Module, Pending...
-# class NeRFVolumeRendering(nn.Module):
-#     def __init__(self, cin=3, cin_view=3, cout=4, feat_dim=256, depth=8, skips=[4]):
-#         super(NeRFVolumeRendering, self).__init__()
-#
-#         dense_network = [
-#             nn.Linear(cin, feat_dim, bias=False),
-#             nn.ReLU(inplace=True)
-#         ]
-#         for i in range(depth - 1):
-#             if i < depth - 2:
-#                 dense_network.append(nn.Linear(feat_dim, feat_dim, bias=False))
-#                 dense_network.append(nn.ReLU(inplace=True))
-#             else:
-#                 dense_network.append(nn.Linear(feat_dim, cout, bias=False))
-#         self.dense_network = nn.Sequential(*dense_network)
-#
-#     def forward(self, input):
-#         return self.dense_network(input)
+class PreNorm(nn.Module):
+    def __init__(self, dim, fn):
+        super().__init__()
+        self.norm = nn.LayerNorm(dim)
+        self.fn = fn
+
+    def forward(self, x, **kwargs):
+        return self.fn(self.norm(x), **kwargs)
+
+
+class GELU(nn.Module):
+    def forward(self, input: Tensor) -> Tensor:
+        return F.gelu(input)
+
+
+class FeedForward(nn.Module):
+    def __init__(self, dim, hidden_dim, dropout=0.):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(dim, hidden_dim),
+            GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, dim),
+            nn.Dropout(dropout)
+        )
+
+    def forward(self, x):
+        return self.net(x)
+
+
+class Attention(nn.Module):
+    def __init__(self, dim, heads=8, dim_head=64, dropout=0.):
+        super().__init__()
+        inner_dim = dim_head * heads
+        project_out = not (heads == 1 and dim_head == dim)
+
+        self.heads = heads
+        self.scale = dim_head ** -0.5
+
+        self.attend = nn.Softmax(dim=-1)
+        self.to_qkv = nn.Linear(dim, inner_dim * 3, bias=False)
+
+        self.to_out = nn.Sequential(
+            nn.Linear(inner_dim, dim),
+            nn.Dropout(dropout)
+        ) if project_out else nn.Identity()
+
+    def forward(self, x):
+        qkv = self.to_qkv(x).chunk(3, dim=-1)
+        q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h=self.heads), qkv)
+
+        dots = torch.matmul(q, k.transpose(-1, -2)) * self.scale
+
+        attn = self.attend(dots)
+
+        out = torch.matmul(attn, v)
+        out = rearrange(out, 'b h n d -> b n (h d)')
+        return self.to_out(out)
+
+
+class Transformer(nn.Module):
+    def __init__(self, dim, depth, heads, dim_head, mlp_dim, dropout=0.):
+        super().__init__()
+        self.layers = nn.ModuleList([])
+        for _ in range(depth):
+            self.layers.append(nn.ModuleList([
+                PreNorm(dim, Attention(dim, heads=heads, dim_head=dim_head, dropout=dropout)),
+                PreNorm(dim, FeedForward(dim, mlp_dim, dropout=dropout))
+            ]))
+
+    def forward(self, x):
+        for attn, ff in self.layers:
+            x = attn(x) + x
+            x = ff(x) + x
+        return x
 
 
 class EDDeconv(nn.Module):
     def __init__(self, cin, cout, zdim=128, nf=64, activation=nn.Tanh):
         super(EDDeconv, self).__init__()
         # downsampling
-        network = [
+        downsampling = [
             nn.Conv2d(cin, nf, kernel_size=4, stride=2, padding=1, bias=False),  # 64x64 -> 32x32
             nn.GroupNorm(16, nf),
             nn.LeakyReLU(0.2, inplace=True),
@@ -69,8 +129,9 @@ class EDDeconv(nn.Module):
             nn.Conv2d(nf * 8, zdim, kernel_size=4, stride=1, padding=0, bias=False),  # 4x4 -> 1x1
             nn.ReLU(inplace=True),
         ]
+        self.transformer = Transformer(dim=256, depth=6, heads=16, dim_head=64, mlp_dim=2048, dropout=0.)
         # upsampling
-        network += [
+        upsampling = [
             nn.ConvTranspose2d(zdim, nf * 8, kernel_size=4, stride=1, padding=0, bias=False),  # 1x1 -> 4x4
             nn.ReLU(inplace=True),
             nn.Conv2d(nf * 8, nf * 8, kernel_size=3, stride=1, padding=1, bias=False),
@@ -103,11 +164,17 @@ class EDDeconv(nn.Module):
             nn.Conv2d(nf, cout, kernel_size=5, stride=1, padding=2, bias=False),
         ]
         if activation is not None:
-            network += [activation()]
-        self.network = nn.Sequential(*network)
+            upsampling += [activation()]
+        self.downsampling = nn.Sequential(*downsampling)
+        self.upsampling = nn.Sequential(*upsampling)
 
     def forward(self, input):
-        return self.network(input)
+        x = self.downsampling(input)
+        x = x.view(1, -1, 256)
+        x = self.transformer(x)
+        x = x.view(-1, 256, 1, 1)
+        x = self.upsampling(x)
+        return x
 
 
 class ConfNet(nn.Module):
